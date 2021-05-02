@@ -1,0 +1,157 @@
+import unittest
+
+import logging
+import json
+from ibm_watson_machine_learning.tests.utils import get_wml_credentials, get_cos_credentials, get_space_id
+from ibm_watson_machine_learning.tests.utils.cleanup import space_cleanup
+from ibm_watson_machine_learning import APIClient
+
+
+class TestAIFunction(unittest.TestCase):
+    deployment_uid = None
+    function_uid = None
+    scoring_url = None
+    space_name = 'tests_sdk_space'
+    function_name = 'simplest AI function'
+    deployment_name = "Test deployment"
+    logger = logging.getLogger(__name__)
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """
+        Load WML credentials from config.ini file based on ENV variable.
+        """
+
+        cls.wml_credentials = get_wml_credentials()
+
+        cls.wml_client = APIClient(wml_credentials=cls.wml_credentials)
+
+        if not cls.wml_client.ICP:
+            cls.cos_credentials = get_cos_credentials()
+            cls.cos_endpoint = cls.cos_credentials.get('endpoint_url')
+            cls.cos_resource_instance_id = cls.cos_credentials.get('resource_instance_id')
+
+        cls.wml_client = APIClient(wml_credentials=cls.wml_credentials)
+        cls.project_id = cls.wml_credentials.get('project_id')
+
+    def test_00a_space_cleanup(self):
+        space_cleanup(self.wml_client,
+                      get_space_id(self.wml_client, self.space_name,
+                                   cos_resource_instance_id=self.cos_resource_instance_id),
+                      days_old=7)
+        TestAIFunction.space_id = get_space_id(self.wml_client, self.space_name,
+                                                            cos_resource_instance_id=self.cos_resource_instance_id)
+
+        if self.wml_client.ICP:
+            self.wml_client.set.default_project(self.project_id)
+        else:
+            self.wml_client.set.default_space(self.space_id)
+
+    def test_02_create_ai_function(self):
+
+        sw_spec_id = self.wml_client.software_specifications.get_id_by_name('default_py3.7')
+        self.wml_client.repository.FunctionMetaNames.show()
+
+        function_props = {
+            self.wml_client.repository.FunctionMetaNames.NAME:  self.function_name,
+            self.wml_client.repository.FunctionMetaNames.SOFTWARE_SPEC_UID: sw_spec_id
+        }
+
+        def score(payload):
+            payload = payload['input_data'][0]
+            values = [[row[0] * row[1]] for row in payload['values']]
+            return {'predictions': [{'fields': ['multiplication'], 'values': values}]}
+
+        ai_function_details = self.wml_client.repository.store_function(score, function_props)
+
+        TestAIFunction.function_uid = self.wml_client.repository.get_function_uid(ai_function_details)
+        function_url = self.wml_client.repository.get_function_href(ai_function_details)
+        TestAIFunction.logger.info("AI function ID:" + str(TestAIFunction.function_uid))
+        TestAIFunction.logger.info("AI function URL:" + str(function_url))
+        self.assertIsNotNone(TestAIFunction.function_uid)
+        self.assertIsNotNone(function_url)
+
+    def test_03_update_function(self):
+        function_props = {
+            self.wml_client.repository.FunctionMetaNames.NAME: 'simplest AI function',
+            self.wml_client.repository.FunctionMetaNames.DESCRIPTION: 'desc',
+            #self.wml_client.repository.FunctionMetaNames.TAGS: [{"value": "ProjectA", "description": "Functions created for ProjectA"}],
+        }
+
+        details = self.wml_client.repository.update_function(TestAIFunction.function_uid, function_props)
+        self.assertFalse('xxxx' in json.dumps(details))
+
+    def test_04_download_ai_function_content(self):
+        try:
+            import os
+            os.remove('test_ai_function_v41.gz')
+        except:
+            pass
+        self.wml_client.repository.download(TestAIFunction.function_uid, filename='test_ai_function_v41.gz')
+        try:
+            os.remove('test_ai_function_v41.gz')
+        except:
+            pass
+
+    def test_05_get_details(self):
+
+        details = self.wml_client.repository.get_function_details(self.function_uid)
+        self.assertTrue(self.function_name in str(details))
+
+    def test_06_list(self):
+        self.wml_client.repository.list()
+
+        self.wml_client.repository.list_functions()
+    def test_07_create_deployment(self):
+        deploy_meta = {
+            self.wml_client.deployments.ConfigurationMetaNames.NAME: "deployment_Function",
+            self.wml_client.deployments.ConfigurationMetaNames.DESCRIPTION: "deployment_description",
+            self.wml_client.deployments.ConfigurationMetaNames.ONLINE: {}
+        }
+
+        TestAIFunction.logger.info("Create deployment")
+        deployment = self.wml_client.deployments.create(artifact_uid=TestAIFunction.function_uid, meta_props=deploy_meta)
+        TestAIFunction.logger.debug("deployment: " + str(deployment))
+        TestAIFunction.scoring_url = self.wml_client.deployments.get_scoring_href(deployment)
+        TestAIFunction.logger.debug("Scoring href: {}".format(TestAIFunction.scoring_url))
+        TestAIFunction.deployment_uid = self.wml_client.deployments.get_uid(deployment)
+        TestAIFunction.logger.debug("Deployment uid: {}".format(TestAIFunction.deployment_uid))
+        self.wml_client.deployments.list()
+        self.assertTrue("deployment_Function" in str(deployment))
+
+    def test_08_update_deployment(self):
+        patch_meta = {
+            self.wml_client.deployments.ConfigurationMetaNames.DESCRIPTION: "deployment_Updated_Function_Description",
+        }
+        self.wml_client.deployments.update(TestAIFunction.deployment_uid, patch_meta)
+
+    def test_09_get_deployment_details(self):
+        TestAIFunction.logger.info("Get deployment details")
+        deployment_details = self.wml_client.deployments.get_details()
+        TestAIFunction.logger.debug("Deployment details: {}".format(deployment_details))
+        self.assertTrue("deployment_Function" in str(deployment_details))
+
+    def test_10_score(self):
+        scoring_payload = {
+            self.wml_client.deployments.ScoringMetaNames.INPUT_DATA: [{
+                "fields": ["multiplication"],
+                "values": [[2.0, 2.0], [99.0, 99.0]]
+            }
+            ]
+        }
+        predictions = self.wml_client.deployments.score(TestAIFunction.deployment_uid, scoring_payload)
+        print("Predictions: {}".format(predictions))
+        self.assertTrue("values" in str(predictions))
+
+    def test_11_delete_deployment(self):
+        TestAIFunction.logger.info("Delete deployment")
+        self.wml_client.deployments.delete(TestAIFunction.deployment_uid)
+
+    def test_12_delete_function(self):
+        TestAIFunction.logger.info("Delete function")
+        self.wml_client.repository.delete(TestAIFunction.function_uid)
+
+
+
+if __name__ == '__main__':
+    unittest.main()

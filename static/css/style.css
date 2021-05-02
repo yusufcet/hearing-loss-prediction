@@ -1,0 +1,58 @@
+body {
+    background-image: url("../images/hearing-loss.png");
+    background-repeat: repeat-y;
+    background-position: center;
+    background-size: cover;
+    min-height: 100% !important;
+}
+
+.page-title {
+    color: white;
+    font-size: 5vw;
+    font-weight: bold;
+}
+
+.predict-form {
+    border-radius: 6px;
+    border: 2px solid #708A82;
+    background-color: rgba(255, 255, 255, 0.8);
+}
+
+.predict-form-title {
+    font-size: 110%;
+    font-weight: 500;
+}
+
+.predict-form-form li {
+    font-weight: 600;
+    font-size: 110%;
+
+}
+
+.btn-red {
+    border: 0 !important;
+    border-radius: 0 !important;
+    background-color: #F60419 !important;
+    color: white;
+    margin: 0 auto;
+    font-size: 110%;
+}
+
+form {
+    display: flex;
+    flex-direction: column;
+}
+
+.btn-red:hover {
+    color: #e5e3e3;
+}
+
+.form-input {
+    width: 60px;
+}
+
+.predict-form-result {
+    font-size: 110%;
+    color: red;
+    font-weight: 600;
+}
